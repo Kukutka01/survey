@@ -14,8 +14,21 @@
 # указывают на /srv/worker и /srv/docker.
 set -e
 
-: "${SURVEY_SIGNING_KEY:?SURVEY_SIGNING_KEY не задан. Сгенерируйте: openssl rand -base64 32}"
-: "${VK_ENCRYPTION_KEY:?VK_ENCRYPTION_KEY не задан. Сгенерируйте: openssl rand -base64 32}"
+# Если compose не передал секреты (например, в .env нет строк SURVEY_SIGNING_KEY /
+# VK_ENCRYPTION_KEY или файл .env отсутствует) — выводим понятную инструкцию и
+# завершаемся с ошибкой. Контейнер перезапустится через 30 секунд, к этому времени
+# можно успеть исправить .env.
+if [ -z "$SURVEY_SIGNING_KEY" ] || [ -z "$VK_ENCRYPTION_KEY" ]; then
+  echo "[entrypoint] ОШИБКА: не заданы секреты SURVEY_SIGNING_KEY и/или VK_ENCRYPTION_KEY." >&2
+  echo "[entrypoint] Выполните в каталоге проекта:" >&2
+  echo "[entrypoint]   cp -n .env.example .env" >&2
+  echo "[entrypoint]   echo \"SURVEY_SIGNING_KEY=\$(openssl rand -base64 32)\" >> .env" >&2
+  echo "[entrypoint]   echo \"VK_ENCRYPTION_KEY=\$(openssl rand -base64 32)\"  >> .env" >&2
+  echo "[entrypoint] затем: docker compose up -d" >&2
+  sleep 30
+  exit 1
+fi
+
 export PORT="${PORT:-8080}"
 # envsubst подставляет переменные в шаблоны workerd.*.template; без экспорта
 # SURVEY_SIGNING_KEY / VK_ENCRYPTION_KEY раскроются в пустые строки и воркер
