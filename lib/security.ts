@@ -53,7 +53,7 @@ export async function boundedJson(request:Request){if(request.headers.get('conte
 export async function privateProfileId(responseId:string){return sign('vk-link:'+responseId)}
 export async function encryptProfile(link:string,profileId:string){const key=await crypto.subtle.importKey('raw',secret('VK_ENCRYPTION_KEY'),'AES-GCM',false,['encrypt']);const iv=crypto.getRandomValues(new Uint8Array(12));const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder.encode(profileId)},key,encoder.encode(link));return JSON.stringify({v:1,iv:encode(iv),ciphertext:encode(ciphertext)})}
 export async function payloadHash(payload:string){return sign('payload:'+payload)}
-export function errorResponse(e:unknown){if(e instanceof HttpError)return json({error:e.message},e.status,e.status===429?{'Retry-After':'600'}:{});console.error('Survey service unavailable');return json({error:'Service unavailable. Please retry.'},503)}
+export function errorResponse(e:unknown){if(e instanceof HttpError)return json({error:e.message},e.status,e.status===429?{'Retry-After':'600'}:{});console.error('Survey service unavailable',e instanceof Error?(e.stack||e.message):String(e));return json({error:'Service unavailable. Please retry.'},503)}
 
 // ---------- Админка ----------
 export function adminPassword():string|undefined{const v=binding('ADMIN_PASSWORD');return v&&v.length>=12?v:undefined}

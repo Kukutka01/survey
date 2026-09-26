@@ -1,1 +1,10 @@
-(empty)
+# Build artifacts
+dist/
+.next/
+
+# Wrangler / Cloudflare Workers state and config
+.wrangler/
+.sites-runtime/
+
+# TypeScript build info
+tsconfig.tsbuildinfo

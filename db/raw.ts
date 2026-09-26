@@ -41,34 +41,35 @@ function getLocalDb() {
     const bound = values.length ? statement.bind(...values) : statement;
     return bound;
   }
-  function makeStatement(sql: string) {
-    const handle = {
-      bind: (...values: unknown[]) => {
-        const bound = { __sql: sql, __values: values };
-        state.statements.set(bound, { sql, values });
-        return {
-          first: async <T = unknown>(column?: string): Promise<T | null> => {
-            const row = column
-              ? runSql(sql, values).get(column)
-              : runSql(sql, values).get();
-            if (row === undefined || row === null) return null;
-            if (column) return coerce(row) as T;
-            return normalizeRow(row as Record<string, unknown>) as T;
-          },
-          all: async <T = unknown>(): Promise<{ results: T[] }> => ({
-            results: (runSql(sql, values).all() as Record<string, unknown>[]).map(r => normalizeRow(r) as T),
-          }),
-          run: async <T = unknown>(): Promise<D1ResultLike<T>> => { runSql(sql, values).run(); return { success: true, results: [], meta: {} }; },
-        };
+  function makeBound(sql: string, values: unknown[]): BoundStatementLike & { __bound: true } {
+    return {
+      __bound: true,
+      first: async <T = unknown>(column?: string): Promise<T | null> => {
+        const row = column
+          ? runSql(sql, values).get(column)
+          : runSql(sql, values).get();
+        if (row === undefined || row === null) return null;
+        if (column) return coerce(row) as T;
+        return normalizeRow(row as Record<string, unknown>) as T;
       },
+      all: async <T = unknown>(): Promise<D1ResultLike<T>> => ({
+        results: (runSql(sql, values).all() as Record<string, unknown>[]).map(r => normalizeRow(r) as T),
+      }),
+      run: async <T = unknown>(): Promise<D1ResultLike<T>> => { runSql(sql, values).run(); return { success: true, results: [], meta: {} }; },
     };
-    // batch() получает уже связанные statements — запоминаем их параметры
-    return new Proxy(handle, {
-      get(target, prop) {
-        if (prop === '__d1Statement') return true;
-        return (target as any)[prop];
+  }
+  function makeStatement(sql: string): StatementLike {
+    // bind() возвращает связанный statement; batch() по нему же достаёт sql/values.
+    return {
+      bind: (...values: unknown[]) => {
+        const bound = makeBound(sql, values);
+        state.statements.set(bound, { sql, values });
+        return bound;
       },
-    });
+      first: <T = unknown>(column?: string) => makeBound(sql, []).first<T>(column),
+      all: <T = unknown>() => makeBound(sql, []).all<T>(),
+      run: <T = unknown>() => makeBound(sql, []).run<T>(),
+    };
   }
   return {
     prepare: (sql: string) => makeStatement(sql),
