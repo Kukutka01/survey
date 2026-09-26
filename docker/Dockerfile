@@ -43,9 +43,9 @@ WORKDIR /srv
 # dist/server — бандл worker; dist/client — статические ассеты (отдаются binding ASSETS)
 COPY --from=build /app/dist/server ./worker
 COPY --from=build /app/dist/client ./assets
-COPY docker/workerd.config.template docker/workerd.init.config.template \
+COPY ./docker/workerd.config.template docker/workerd.init.config.template \
      docker/init-worker.mjs docker/migrations.sql docker/entrypoint.sh ./docker/
-RUN chmod +x docker/entrypoint.sh && chown -R appuser:appuser /srv
+RUN chmod +x ./docker/entrypoint.sh && chown -R appuser:appuser /srv
 
 USER appuser
 ENV PORT=8080
