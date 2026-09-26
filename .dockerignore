@@ -1,0 +1,11 @@
+node_modules
+.next
+.wrangler
+.openai
+.work
+vendor
+examples
+*.tsbuildinfo
+.env
+.env.*
+data
