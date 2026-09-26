@@ -17,9 +17,17 @@ mkdir -p /data/cache
 envsubst < /srv/docker/workerd.config.template   > /tmp/workerd.config.capnp
 envsubst < /srv/docker/workerd.init.config.template > /tmp/workerd.init.config.capnp
 
-echo "[entrypoint] initializing database schema..."
-if ! workerd --root /srv /tmp/workerd.init.config.capnp; then
-  echo "[entrypoint] WARNING: init failed, continuing (schema may already exist)" >&2
+# workerd в обычном режиме слушает сокеты из конфига и не завершается сам,
+# поэтому инит-прогон ограничиваем по времени (timeout) — за это время
+# scheduled-хук успевает применить миграции.
+INIT_TIMEOUT="${DB_INIT_TIMEOUT:-10}"
+echo "[entrypoint] initializing database schema (up to ${INIT_TIMEOUT}s)..."
+timeout "$INIT_TIMEOUT" workerd --root /srv /tmp/workerd.init.config.capnp >/tmp/init.log 2>&1 || true
+if grep -q "\[init\]" /tmp/init.log; then
+  sed -n 's/.*(\[init\].*)/\1/p' /tmp/init.log | tail -1
+else
+  echo "[entrypoint] WARNING: schema init did not report success; last init lines:" >&2
+  tail -5 /tmp/init.log >&2 || true
 fi
 
 echo "[entrypoint] starting workerd on :${PORT}"
