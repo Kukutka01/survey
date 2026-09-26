@@ -1,0 +1,48 @@
+# Конфигурация workerd для продакшн-контейнера (standalone, без Cloudflare).
+# Переменные подставляет entrypoint.sh через envsubst.
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    name = "main",
+    worker = surveyApp,
+    # Egress строго запрещён: приложение не должно ходить наружу
+    # (защита от SSRF и утечки данных из контейнера).
+    name = "internet",
+    external = (address = "127.0.0.1")
+  ],
+  sockets = [
+    ( name = "http",
+      address = "0.0.0.0:${PORT}",
+      http = true,
+      service = "main"
+    )
+  ]
+);
+
+const surveyApp :Workerd.Worker = (
+  compatibilityDate = "2026-09-01",
+  bindings = [
+    # D1 поверх локального SQLite-файла на volume /data (переживает рестарты).
+    ( name = "DB",
+      durableSqlStorage = ( disk = ( path = "/data/survey-db.sqlite", schema = "v1" ) )
+    ),
+    # Статические ассеты прод-сборки (JS/CSS/изображения).
+    ( name = "ASSETS", builtinAssets = (
+        directory = "./assets",
+        browser_TTL = 86400,
+        handleHtmlRequests = ( injectCrossOriginEmbedder = null )
+    ) ),
+    ( name = "SURVEY_SIGNING_KEY", type = "text", text = "${SURVEY_SIGNING_KEY}"),
+    ( name = "VK_ENCRYPTION_KEY",  type = "text", text = "${VK_ENCRYPTION_KEY}"),
+    ( name = "TRUSTED_PROXIES",    type = "text", text = "${TRUSTED_PROXIES}"),
+    ( name = "ADMIN_PASSWORD",     type = "text", text = "${ADMIN_PASSWORD}")
+  ],
+  modules = [
+    ( name = "index.js",
+      esModule = embed "./worker/index.js"
+    )
+  ],
+  caches = localDisk,
+  publicBuckets = (browserCache = "cache", disk = "/data/cache")
+);

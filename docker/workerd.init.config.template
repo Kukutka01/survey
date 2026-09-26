@@ -1,0 +1,23 @@
+# Одноразовый init-воркер: открывает D1 (/data/survey-db.sqlite), применяет
+# docker/migrations.sql и завершает работу. Запускается entrypoint.sh до основного сервера.
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [name = "main", worker = surveyInit],
+  sockets = []
+);
+
+const surveyInit :Workerd.Worker = (
+  compatibilityDate = "2026-09-01",
+  bindings = [
+    ( name = "DB",
+      durableSqlStorage = ( disk = ( path = "/data/survey-db.sqlite", schema = "v1" ) )
+    ),
+    ( name = "MIGRATIONS_SQL", type = "text", data = embed "./docker/migrations.sql")
+  ],
+  modules = [
+    ( name = "init.js",
+      esModule = embed "./docker/init-worker.mjs"
+    )
+  ]
+);

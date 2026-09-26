@@ -1,0 +1,10 @@
+# Dependencies
+node_modules/
+# артефакты сборки (не коммитить)
+.next/
+.wrangler/
+dist/
+out/
+work/
+*.tsbuildinfo
+trajectory-survey-full.tar.gz

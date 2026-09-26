@@ -1,0 +1,38 @@
+# Развертывание анкеты «Траектория» на своём сервере.
+#
+# Подготовка:
+#   cp .env.example .env
+#   openssl rand -base64 32   # -> SURVEY_SIGNING_KEY
+#   openssl rand -base64 32   # -> VK_ENCRYPTION_KEY
+#   (права на .env: chmod 600 .env)
+#
+# Запуск:            docker compose up -d --build
+# Просмотр логов:    docker compose logs -f survey
+# Бэкап данных:      docker compose stop survey && tar czf backup.tgz ./data && docker compose start survey
+services:
+  survey:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: trajectory-survey:latest
+    container_name: trajectory-survey
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Только loopback: наружу сервис отдаётся reverse-proxy (nginx/caddy) с TLS.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data          # SQLite-БД и кэш — переживают рестарты/обновления образа
+    read_only: true           # ФС контейнера read-only, запись только в /data и tmpfs
+    tmpfs:
+      - /tmp:size=32M
+      - /dev/shm:size=32M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"

@@ -1,0 +1,16 @@
+// Конфигурация Worker для продакшена (workerd / Docker) и локальной разработки.
+// Секреты SURVEY_SIGNING_KEY и VK_ENCRYPTION_KEY НЕ хранятся здесь —
+// они передаются через env_file в docker-compose или `wrangler secret put`.
+{
+  "name": "trajectory-survey",
+  "main": "vinext/server/fetch-handler",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "trajectory-survey-db",
+      "database_id": "00000000-0000-4000-8000-000000000000"
+    }
+  ]
+}
