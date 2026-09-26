@@ -2,6 +2,17 @@
 //  - Cloudflare Workers / wrangler dev (miniflare): binding DB (D1, SQLite в .wrangler/state).
 //  - Standalone Node-контейнер (docker-compose): node:sqlite, файл SURVEY_DB_PATH (volume /data).
 // Адаптер ниже повторяет интерфейс D1: prepare().bind().first()/all()/run() и batch().
+// Типы возвращаемых значений — как в @cloudflare/workers-types (D1PreparedStatement),
+// чтобы .first<T>()/.all<T>() корректно типизировались и в Node, и в Workers.
+interface D1ResultLike<T = unknown> { results: T[]; success?: boolean; meta?: Record<string, unknown> }
+interface BoundStatementLike {
+  first<T = unknown>(column?: string): Promise<T | null>;
+  all<T = unknown>(): Promise<D1ResultLike<T>>;
+  run<T = unknown>(): Promise<D1ResultLike<T>>;
+}
+// Совместимо с D1PreparedStatement: bind() возвращает объект, на котором сразу вызывают first/all/run.
+interface StatementLike extends BoundStatementLike { bind(...values: unknown[]): BoundStatementLike }
+interface DbLike { prepare(sql: string): StatementLike; batch(items: BoundStatementLike[]): Promise<D1ResultLike[]> }
 let cached: { db: any; statements: WeakMap<object, { sql: string; values: unknown[] }> } | null = null;
 
 function coerce(value: unknown) {
@@ -47,7 +58,7 @@ function getLocalDb() {
           all: async <T = unknown>(): Promise<{ results: T[] }> => ({
             results: (runSql(sql, values).all() as Record<string, unknown>[]).map(r => normalizeRow(r) as T),
           }),
-          run: async () => { runSql(sql, values).run(); return { success: true, meta: {} }; },
+          run: async <T = unknown>(): Promise<D1ResultLike<T>> => { runSql(sql, values).run(); return { success: true, results: [], meta: {} }; },
         };
       },
     };
@@ -77,7 +88,7 @@ function getLocalDb() {
   };
 }
 
-export function getRawDb(): any {
+export function getRawDb(): DbLike {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const workersEnv = require('cloudflare:workers')?.env;

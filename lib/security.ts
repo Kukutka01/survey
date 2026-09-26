@@ -34,6 +34,8 @@ export async function createSession(request:Request){const session={nonce:crypto
 export async function csrf(session:Session){return sign('csrf:'+session.nonce)}
 // Анти-бот: apiNonce привязан к nonce CSP (x-nonce выставляется middleware на каждый ответ).
 // Бот, скрейпящий HTML и вызывающий fetch() вне страницы, не знает актуальный CSP-nonce и получает 403.
+// CSP-nonce читается из запроса (его выставляет middleware), а не из ответа,
+// который в момент вызова ещё не создан — иначе привязка к nonce страницы терялась бы.
 export async function apiNonce(request:Request){return sign('apinonce:'+(request.headers.get('x-nonce')??''))}
 export function sameOrigin(request:Request,required=false){const origin=request.headers.get('origin');const fetchSite=request.headers.get('sec-fetch-site');if(fetchSite&&fetchSite!=='same-origin'&&fetchSite!=='none')throw new HttpError(403,'Forbidden');if((required&&!origin)||(origin&&origin!==new URL(request.url).origin))throw new HttpError(403,'Forbidden')}
 export async function rateLimit(request:Request,scope:'session'|'submit',session?:Session){

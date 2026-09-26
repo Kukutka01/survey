@@ -14,8 +14,9 @@ export async function POST(request:Request){try{
  sameOrigin(request,true);const session=await readSession(request);if(!session||request.headers.get('x-survey-csrf')!==await csrf(session))throw new HttpError(403,'Invalid session');
  // Анти-бот 1: apiNonce привязан к CSP-nonce страницы — запрос вне рендера сайта не пройдёт.
  if(request.headers.get('x-survey-nonce')!==await apiNonce(request))throw new HttpError(403,'Invalid session');
- // Анти-бот 2: анкета заполняется минимум ~15 минут; мгновенная отправка признак автотеста/скрипта.
- const age=await sessionAge(request);if(age<60)throw new HttpError(429,'Too many requests');
+ // Анти-бот 2: мгновенная отправка сразу после выдачи сессии — признак автотеста/скрипта.
+ // Клиент дополнительно выдерживает локальный таймер (MIN_FILL_MS в app/page.tsx).
+ const age=await sessionAge(request);if(age<60)throw new HttpError(429,'Too early');
  await rateLimit(request,'submit',session);
  const data=await boundedJson(request);
  if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!['id','answers','vkConsent','questionnaireVersion'].includes(k))||data.questionnaireVersion!==2||typeof data.vkConsent!=='boolean'||typeof data.id!=='string'||!/^\b[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(data.id)||!data.answers||typeof data.answers!=='object'||Array.isArray(data.answers))throw new HttpError(400,'Invalid submission');
