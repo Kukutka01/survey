@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1789922166016,
+      "tag": "0000_outgoing_fixer",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790406475833,
+      "tag": "0001_acoustic_mole_man",
+      "breakpoints": true
+    }
+  ]
+}

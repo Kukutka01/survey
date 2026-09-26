@@ -1,0 +1,15 @@
+HTTP/1.1 200 OK
+vary: RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Router-Segment-Prefetch, Next-Url, X-Vinext-Interception-Context, X-Vinext-Mounted-Slots, X-Vinext-Rsc-Render-Mode
+cache-control: no-store
+content-security-policy: default-src 'self'; script-src 'self' 'nonce-ZGFlMTNlMTEtMWJlMi00MDcxLWE3YjUtZWUzYmM5Y2QxOGYx' 'strict-dynamic' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+content-type: text/html; charset=utf-8
+cross-origin-resource-policy: same-origin
+permissions-policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+referrer-policy: no-referrer
+transfer-encoding: chunked
+x-content-type-options: nosniff
+x-frame-options: DENY
+Date: Sat, 26 Sep 2026 07:09:46 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
