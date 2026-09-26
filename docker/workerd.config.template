@@ -38,11 +38,15 @@ const surveyApp :Workerd.Worker = (
     ( name = "TRUSTED_PROXIES",    type = "text", text = "${TRUSTED_PROXIES}"),
     ( name = "ADMIN_PASSWORD",     type = "text", text = "${ADMIN_PASSWORD}")
   ],
+  # compat-флаг обязателен: без него workerd игнорирует caches/publicBuckets,
+  # и runtime-код сборки вызывает getCache() -> TypeError при каждом запросе.
+  compatibilityFlags = ("cache_api",),
   modules = [
     ( name = "index.js",
       esModule = embed "./worker/index.js"
     )
   ],
-  caches = localDisk,
-  publicBuckets = (browserCache = "cache", disk = "/data/cache")
+  # /tmp — tmpfs в docker-compose (запись разрешена даже при read_only rootfs)
+  caches = ( directory = "/tmp/wc-cache" ),
+  publicBuckets = (browserCache = "cache", disk = "/tmp/wc-bucket")
 );
