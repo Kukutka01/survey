@@ -22,34 +22,3 @@
 
 npm run dev; npx tsc --noEmit; npm run db:generate; npm run build.
 Миграции drizzle/ неизменяемы после применения. Тестовые записи создавались только в локальной базе. Production не содержит тестовых респондентов.
-
-
-## Деплой на своём сервере (Docker)
-
-```bash
-cp .env.example .env && chmod 600 .env
-openssl rand -base64 32   # -> SURVEY_SIGNING_KEY (вписать в .env)
-openssl rand -base64 32   # -> VK_ENCRYPTION_KEY  (вписать в .env)
-docker compose up -d --build
-```
-
-Сервис слушает только 127.0.0.1:8080 — наружу отдаётся через reverse-proxy
-(nginx/caddy) с TLS. Пример nginx: proxy_pass http://127.0.0.1:8080 +
-`proxy_set_header X-Real-IP $remote_addr;` и `TRUSTED_PROXIES=<ip прокси>` в .env.
-
-Бэкап: `tar czf backup.tgz ./data` (SQLite-файл + кэш).
-
-## Где и как хранятся данные
-
-| Что | Где | Как |
-|---|---|---|
-| Ответы анкеты | volume `./data/survey-db.sqlite`, таблица `survey_submissions` | id (UUID клиента), ответы JSON, HMAC-хеш payload, дата |
-| Ссылка VK | таблица `private_profiles` (тот же файл) | AES-256-GCM, ключ `VK_ENCRYPTION_KEY`, AAD = id профиля; отдельно от ответов |
-| Сессии/CSRF | cookie клиента (`__Host-survey_session`) | подписывается HMAC (SURVEY_SIGNING_KEY), HttpOnly/SameSite=Strict/Secure |
-| Rate-limit | таблица `rate_limits` | HMAC-хеш IP+скоуп, скользящее окно 10 мин, автоочистка |
-| Черновик | только sessionStorage браузера | до закрытия вкладки / 4 ч; ссылка VK не сохраняется |
-| Секреты | `.env` на сервере (вне Git, права 600) | попадают в контейнер через env_file |
-
-Защита от ботов/накруток: CSP-nonce привязан к apiNonce, CSRF-токен,
-минимальный возраст сессии (60 с на сервере + 2 минуты клиентский таймер),
-лимит 2 отправки на сессию, лимиты по IP, проверка consent и схемы ответов.
