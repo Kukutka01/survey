@@ -1,10 +1,18 @@
 # Одноразовый init-воркер: открывает D1 (/data/survey-db.sqlite), применяет
-# docker/migrations.sql и завершает работу. Запускается entrypoint.sh до основного сервера.
+# docker/migrations.sql. Запускается entrypoint.sh до основного сервера:
+# workerd в standalone-режиму требует хотя бы один socket, поэтому используется
+# служебный ephemeral-порт INIT_PORT, после чего процесс завершается по timeout.
 using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
   services = [name = "main", worker = surveyInit],
-  sockets = []
+  sockets = [
+    ( name = "http",
+      address = "127.0.0.1:${INIT_PORT}",
+      http = true,
+      service = "main"
+    )
+  ]
 );
 
 const surveyInit :Workerd.Worker = (
