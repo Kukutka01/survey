@@ -1,6 +1,5 @@
-
 function binding(name: string): string | undefined {
-  try { return (globalThis as any).process?.env?.[name]; } catch { return undefined; }
+  try { return process?.env?.[name]; } catch { return undefined; }
 }
 import { getRawDb } from '@/db/raw';
 const encoder=new TextEncoder();
@@ -34,8 +33,6 @@ export async function createSession(request:Request){const session={nonce:crypto
 export async function csrf(session:Session){return sign('csrf:'+session.nonce)}
 // Анти-бот: apiNonce привязан к nonce CSP (x-nonce выставляется middleware на каждый ответ).
 // Бот, скрейпящий HTML и вызывающий fetch() вне страницы, не знает актуальный CSP-nonce и получает 403.
-// CSP-nonce читается из запроса (его выставляет middleware), а не из ответа,
-// который в момент вызова ещё не создан — иначе привязка к nonce страницы терялась бы.
 export async function apiNonce(request:Request){return sign('apinonce:'+(request.headers.get('x-nonce')??''))}
 export function sameOrigin(request:Request,required=false){const origin=request.headers.get('origin');const fetchSite=request.headers.get('sec-fetch-site');if(fetchSite&&fetchSite!=='same-origin'&&fetchSite!=='none')throw new HttpError(403,'Forbidden');if((required&&!origin)||(origin&&origin!==new URL(request.url).origin))throw new HttpError(403,'Forbidden')}
 export async function rateLimit(request:Request,scope:'session'|'submit',session?:Session){
@@ -45,15 +42,15 @@ export async function rateLimit(request:Request,scope:'session'|'submit',session
  // В этом режиме строгий IP-лимит неприменим — полагаемся на session-scoped лимиты, CSRF и минимальный возраст сессии.
  const identities=[{key:await sign(`rate:${scope}:${bucket}:${ip}`),limit:scope==='session'?100:60}];
  if(session)identities.push({key:await sign(`rate:session-submit:${bucket}:${session.nonce}`),limit:2});
- const db=getRawDb();const results=await db.batch(identities.map(x=>db.prepare('INSERT INTO rate_limits (key, count, expires_at) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET count = count + 1 WHERE count < ? RETURNING count').bind(x.key,(bucket+2)*window,x.limit)));
- if(results.some(r=>!r.results?.length))throw new HttpError(429,'Too many requests');
+ const db=getRawDb();const results=(await db.batch<{count:number}>(identities.map(x=>db.prepare('INSERT INTO rate_limits (key, count, expires_at) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET count = count + 1 WHERE count < ? RETURNING count').bind(x.key,(bucket+2)*window,x.limit)))).map(r=>r.results);
+ if(results.some(r=>!r?.length))throw new HttpError(429,'Too many requests');
  await db.prepare('DELETE FROM rate_limits WHERE expires_at < ?').bind(now).run();
 }
 export async function boundedJson(request:Request){if(request.headers.get('content-type')?.split(';')[0].trim().toLowerCase()!=='application/json')throw new HttpError(415,'Expected JSON');if(request.headers.get('content-encoding')&&request.headers.get('content-encoding')!=='identity')throw new HttpError(415,'Unsupported encoding');const limit=32768;const len=request.headers.get('content-length');if(len&&(!/^\d+$/.test(len)||Number(len)>limit))throw new HttpError(413,'Request too large');const reader=request.body?.getReader();if(!reader)throw new HttpError(400,'Missing body');let size=0;const chunks:Uint8Array[]=[];while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit){await reader.cancel();throw new HttpError(413,'Request too large')}chunks.push(value)}const bytes=new Uint8Array(size);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.byteLength}try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes))}catch{throw new HttpError(400,'Invalid JSON')}}
 export async function privateProfileId(responseId:string){return sign('vk-link:'+responseId)}
 export async function encryptProfile(link:string,profileId:string){const key=await crypto.subtle.importKey('raw',secret('VK_ENCRYPTION_KEY'),'AES-GCM',false,['encrypt']);const iv=crypto.getRandomValues(new Uint8Array(12));const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder.encode(profileId)},key,encoder.encode(link));return JSON.stringify({v:1,iv:encode(iv),ciphertext:encode(ciphertext)})}
 export async function payloadHash(payload:string){return sign('payload:'+payload)}
-export function errorResponse(e:unknown){if(e instanceof HttpError)return json({error:e.message},e.status,e.status===429?{'Retry-After':'600'}:{});console.error('Survey service unavailable',e instanceof Error?(e.stack||e.message):String(e));return json({error:'Service unavailable. Please retry.'},503)}
+export function errorResponse(e:unknown){if(e instanceof HttpError)return json({error:e.message},e.status,e.status===429?{'Retry-After':'600'}:{});console.error('Survey service unavailable');return json({error:'Service unavailable. Please retry.'},503)}
 
 // ---------- Админка ----------
 export function adminPassword():string|undefined{const v=binding('ADMIN_PASSWORD');return v&&v.length>=12?v:undefined}

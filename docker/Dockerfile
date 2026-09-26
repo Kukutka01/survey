@@ -11,6 +11,10 @@ ENV NEXT_TELEMETRY_DISABLED=1 npm_config_fund=false npm_config_audit=false
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
+# vite.config.ts импортирует .openai/hosting.json; каталог исключён из контекста
+# через .dockerignore, поэтому кладём файл напрямую (дублирует содержимое репозитория).
+RUN mkdir -p .openai && printf '{\n  "d1": "DB",\n  "r2": null\n}\n' > .openai/hosting.json
+
 # Прод-сборка (vinext -> dist/server + dist/client)
 COPY . .
 RUN npm run build
@@ -23,16 +27,22 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # workerd — standalone-рантайм Cloudflare Workers: исполняет прод-сборку вместе
-# с локальной SQLite-базой (D1 durableSqlStorage binding, volume /data).
-ARG WORKERD_VERSION=1.20250927.0
-RUN ARCH="$(dpkg --print-architecture)" \
+# с локальной SQLite-базой (node:sqlite через флаг nodejs_compat, volume /data).
+# 1.20260926.1 — актуальный релиз; старые версии (<=1.20251100) не поддерживают
+# запуск без --root и имеют несовместимую capnp-схему (см. docker/entrypoint.sh).
+ARG WORKERD_VERSION=1.20260926.1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gzip \
+ && rm -rf /var/lib/apt/lists/* \
+ && ARCH="$(dpkg --print-architecture)" \
  && case "$ARCH" in \
-      amd64) WARCH=x64 ;; \
+      amd64) WARCH=64 ;; \
       arm64) WARCH=arm64 ;; \
       *) echo "unsupported arch: $ARCH" && exit 1 ;; \
     esac \
- && curl -fsSL -o /usr/local/bin/workerd \
-      "https://github.com/cloudflare/workerd/releases/download/v${WORKERD_VERSION}/workerd-linux-${WARCH}" \
+ && curl -fsSL --retry 3 \
+      "https://github.com/cloudflare/workerd/releases/download/v${WORKERD_VERSION}/workerd-linux-${WARCH}.gz" \
+      | gunzip > /usr/local/bin/workerd \
  && chmod 755 /usr/local/bin/workerd \
  && "/usr/local/bin/workerd" --version
 
@@ -43,9 +53,9 @@ WORKDIR /srv
 # dist/server — бандл worker; dist/client — статические ассеты (отдаются binding ASSETS)
 COPY --from=build /app/dist/server ./worker
 COPY --from=build /app/dist/client ./assets
-COPY ./docker/workerd.config.template docker/workerd.init.config.template \
-     docker/init-worker.mjs docker/migrations.sql docker/entrypoint.sh ./docker/
-RUN chmod +x ./docker/entrypoint.sh && chown -R appuser:appuser /srv
+COPY docker/workerd.config.template docker/workerd.init.config.template \
+     docker/init-db.mjs docker/migrations.sql docker/entrypoint.sh ./docker/
+RUN chmod +x docker/entrypoint.sh && chown -R appuser:appuser /srv
 
 USER appuser
 ENV PORT=8080

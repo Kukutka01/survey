@@ -1,31 +1,38 @@
-# Одноразовый init-воркер: открывает D1 (/data/survey-db.sqlite), применяет
-# docker/migrations.sql. Запускается entrypoint.sh до основного сервера:
-# workerd в standalone-режиму требует хотя бы один socket, поэтому используется
-# служебный ephemeral-порт INIT_PORT, после чего процесс завершается по timeout.
+# Одноразовый init-конфигурация: запускается entrypoint.sh ДО основного сервера как
+#   workerd serve --socket-addr=init=unix:/tmp/init.sock /tmp/workerd.init.config.capnp
+# и выключается после одного запроса `curl --unix-socket /tmp/init.sock http://localhost/init`.
+#
+# Init-воркер (docker/init-db.mjs) использует node:sqlite (compatibility flag
+# nodejs_compat, файл /data/survey-db.sqlite на volume) и читает docker/migrations.sql
+# через fetch() со встроенного статического сервиса (disk). Все statements —
+# CREATE ... IF NOT EXISTS, повторные прогоны безопасны.
 using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
-  services = [name = "main", worker = surveyInit],
-  sockets = [
-    ( name = "http",
-      address = "127.0.0.1:${INIT_PORT}",
-      http = true,
-      service = "main"
-    )
-  ]
+  services = [
+    ( name = "main", worker = .surveyInit ),
+    # Корень диска — /srv/docker: отсюда отдаются ./migrations.sql (fetch http://static/migrations.sql)
+    # и модули init-воркера (embed "./init-db.mjs" разрешается относительно этого же корня).
+    ( name = "static", disk = ( path = "/srv/docker" ) )
+  ],
+  # Реального адреса у сокета нет — entrypoint переопределяет его на unix-сокет
+  # через --socket-addr=init=unix:/tmp/init.sock.
+  sockets = [ ( name = "init", address = "127.0.0.1:8999", http = (), service = "main" ) ]
 );
 
 const surveyInit :Workerd.Worker = (
-  compatibilityDate = "2026-09-01",
+  compatibilityDate = "2026-05-15",
+  compatibilityFlags = ["nodejs_compat"],
   bindings = [
-    ( name = "DB",
-      durableSqlStorage = ( disk = ( path = "/data/survey-db.sqlite", schema = "v1" ) )
-    ),
-    ( name = "MIGRATIONS_SQL", type = "text", data = embed "./docker/migrations.sql")
+    # Путь к SQLite-файлу на volume /data; envsubst подставляет значение из окружения.
+    ( name = "SURVEY_DB_PATH", text = "${SURVEY_DB_PATH}" ),
+    # Для fetch() внутри воркера (http://static/...): localhost-only egress не используется,
+    # но binding обязателен, чтобы service "static" был доступен по имени.
+    ( name = "STATIC", service = "static" )
   ],
   modules = [
     ( name = "init.js",
-      esModule = embed "./docker/init-worker.mjs"
+      esModule = embed "./init-db.mjs"
     )
   ]
 );

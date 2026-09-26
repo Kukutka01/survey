@@ -1,6 +1,9 @@
 node_modules
 .next
 .wrangler
+# .openai/hosting.json обязателен для vite.config.ts при сборке. Чтобы COPY . .
+# не перезаписывал его (whitelist-исключения в dockerignore работают ненадёжно),
+# каталог остаётся исключённым, а файл создаётся на этапе сборки в Dockerfile.
 .openai
 .work
 vendor

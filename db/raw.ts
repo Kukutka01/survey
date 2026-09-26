@@ -2,18 +2,34 @@
 //  - Cloudflare Workers / wrangler dev (miniflare): binding DB (D1, SQLite в .wrangler/state).
 //  - Standalone Node-контейнер (docker-compose): node:sqlite, файл SURVEY_DB_PATH (volume /data).
 // Адаптер ниже повторяет интерфейс D1: prepare().bind().first()/all()/run() и batch().
-// Типы возвращаемых значений — как в @cloudflare/workers-types (D1PreparedStatement),
-// чтобы .first<T>()/.all<T>() корректно типизировались и в Node, и в Workers.
-interface D1ResultLike<T = unknown> { results: T[]; success?: boolean; meta?: Record<string, unknown> }
-interface BoundStatementLike {
-  first<T = unknown>(column?: string): Promise<T | null>;
-  all<T = unknown>(): Promise<D1ResultLike<T>>;
-  run<T = unknown>(): Promise<D1ResultLike<T>>;
+
+// Публичный типизированный интерфейс доступа к БД (совместим с Cloudflare D1Result).
+export interface D1Result<T = unknown> { results: T[] }
+export interface D1PreparedStatement {
+  bind(...values: unknown[]): D1PreparedStatement;
+  first<T = Record<string, unknown>>(column?: string): Promise<T | null>;
+  all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
+  run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
 }
-// Совместимо с D1PreparedStatement: bind() возвращает объект, на котором сразу вызывают first/all/run.
-interface StatementLike extends BoundStatementLike { bind(...values: unknown[]): BoundStatementLike }
-interface DbLike { prepare(sql: string): StatementLike; batch(items: BoundStatementLike[]): Promise<D1ResultLike[]> }
-let cached: { db: any; statements: WeakMap<object, { sql: string; values: unknown[] }> } | null = null;
+export interface RawDb {
+  prepare(sql: string): D1PreparedStatement;
+  batch<T = Record<string, unknown>>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
+}
+
+// node:sqlite доступен только в standalone-режиме (в среде Workers его нет),
+// поэтому типы — локальные интерфейсы, а сам модуль грузится require() внутри getLocalDb().
+interface StatementSync {
+  bind(...values: unknown[]): StatementSync;
+  get(column?: string): unknown;
+  all(): Record<string, unknown>[];
+  run(): void;
+}
+interface DatabaseSync {
+  prepare(sql: string): StatementSync;
+  exec(sql: string): void;
+}
+
+let cached: { db: DatabaseSync; statements: WeakMap<object, { sql: string; values: unknown[] }> } | null = null;
 
 function coerce(value: unknown) {
   if (typeof value === 'bigint') return Number(value);
@@ -29,7 +45,7 @@ function normalizeRow(row: Record<string, unknown>) {
 function getLocalDb() {
   if (!cached) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { DatabaseSync } = require('node:sqlite');
+    const { DatabaseSync } = require('node:sqlite') as unknown as { DatabaseSync: new (path: string) => DatabaseSync };
     const path: string = process.env.SURVEY_DB_PATH || '/data/survey-db.sqlite';
     const db = new DatabaseSync(path);
     db.exec('PRAGMA journal_mode = WAL;');
@@ -41,40 +57,39 @@ function getLocalDb() {
     const bound = values.length ? statement.bind(...values) : statement;
     return bound;
   }
-  function makeBound(sql: string, values: unknown[]): BoundStatementLike & { __bound: true } {
-    return {
-      __bound: true,
-      first: async <T = unknown>(column?: string): Promise<T | null> => {
-        const row = column
-          ? runSql(sql, values).get(column)
-          : runSql(sql, values).get();
-        if (row === undefined || row === null) return null;
-        if (column) return coerce(row) as T;
-        return normalizeRow(row as Record<string, unknown>) as T;
-      },
-      all: async <T = unknown>(): Promise<D1ResultLike<T>> => ({
-        results: (runSql(sql, values).all() as Record<string, unknown>[]).map(r => normalizeRow(r) as T),
-      }),
-      run: async <T = unknown>(): Promise<D1ResultLike<T>> => { runSql(sql, values).run(); return { success: true, results: [], meta: {} }; },
-    };
-  }
-  function makeStatement(sql: string): StatementLike {
-    // bind() возвращает связанный statement; batch() по нему же достаёт sql/values.
-    return {
+  function makeStatement(sql: string): D1PreparedStatement {
+    const handle = {
       bind: (...values: unknown[]) => {
-        const bound = makeBound(sql, values);
+        const bound = { __sql: sql, __values: values };
         state.statements.set(bound, { sql, values });
-        return bound;
+        return {
+          first: async <T>(column?: string): Promise<T | null> => {
+            const row = column
+              ? runSql(sql, values).get(column)
+              : runSql(sql, values).get();
+            if (row === undefined || row === null) return null;
+            if (column) return coerce(row) as T;
+            return normalizeRow(row as Record<string, unknown>) as T;
+          },
+          all: async <T>(): Promise<D1Result<T>> => ({
+            results: (runSql(sql, values).all() as Record<string, unknown>[]).map(r => normalizeRow(r) as T),
+          }),
+          run: async <T>(): Promise<D1Result<T>> => { runSql(sql, values).run(); return { results: [] }; },
+        };
       },
-      first: <T = unknown>(column?: string) => makeBound(sql, []).first<T>(column),
-      all: <T = unknown>() => makeBound(sql, []).all<T>(),
-      run: <T = unknown>() => makeBound(sql, []).run<T>(),
     };
+    // batch() получает уже связанные statements — запоминаем их параметры
+    return new Proxy(handle, {
+      get(target, prop) {
+        if (prop === '__d1Statement') return true;
+        return Reflect.get(target, prop);
+      },
+    }) as unknown as D1PreparedStatement;
   }
-  return {
+  const local: RawDb = {
     prepare: (sql: string) => makeStatement(sql),
-    batch: async (items: any[]) => {
-      const results: { results: unknown[] }[] = [];
+    batch: async <T>(items: D1PreparedStatement[]): Promise<D1Result<T>[]> => {
+      const results: D1Result<T>[] = [];
       for (const item of items) {
         const meta = state.statements.get(item);
         if (!meta) throw new Error('batch() expects bound statements');
@@ -82,17 +97,18 @@ function getLocalDb() {
         // INSERT ... RETURNING: забираем строки, иначе — просто выполняем
         let rows: unknown[] = [];
         try { rows = meta.sql.includes('RETURNING') ? bound.all() : (bound.run(), []); } catch { rows = []; }
-        results.push({ results: (rows as Record<string, unknown>[]).map(normalizeRow) });
+        results.push({ results: (rows as Record<string, unknown>[]).map(normalizeRow) as T[] });
       }
       return results;
     },
   };
+  return local;
 }
 
-export function getRawDb(): DbLike {
+export function getRawDb(): RawDb {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const workersEnv = require('cloudflare:workers')?.env;
+    const workersEnv = require('cloudflare:workers')?.env as { DB?: RawDb } | undefined;
     if (workersEnv?.DB) return workersEnv.DB;
   } catch { /* не в среде Workers */ }
   return getLocalDb();
