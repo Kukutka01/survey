@@ -1,6 +1,10 @@
+# Dependencies
+node_modules/
+
 # Build artifacts
 dist/
 .next/
+out/
 
 # Wrangler / Cloudflare Workers state and config
 .wrangler/
